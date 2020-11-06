@@ -4,6 +4,24 @@
 
 { config, pkgs, lib, ... }:
 
+with pkgs;
+let
+  default-python = python38.withPackages (python-packages: with python-packages; [
+    # scientific
+    numpy scipy matplotlib
+    cirq qiskit
+
+    # web
+    requests
+
+    # utility
+    termcolor
+
+    # python development
+    mypy pytest yapf
+  ]);
+
+in
 {
   imports =
     [ # Include the results of the hardware scan.
@@ -75,9 +93,8 @@
     # Utilities
     wget vim git
     htop gotop
-    jq
+    jq fd ripgrep
     sqlite
-    neofetch pywal
     alacritty
     aspell
     rofi grim slurp
@@ -85,10 +102,13 @@
     imagemagick
     mosh nmap
 
+    # Aesthetic things
+    neofetch pywal powerline
+
     # Programming languages
     gcc clang gnumake cmake libtool
     rustup rust-analyzer
-    python38
+    default-python
     nixfmt
 
     # Applications
