@@ -6,10 +6,11 @@
 
 with pkgs;
 let
-  default-python = python38.withPackages (python-packages: with python-packages; [
+  pythonWithPackages = python38.withPackages (python-packages: with python-packages; [
     # scientific
     numpy scipy matplotlib
     cirq qiskit
+    pint
 
     # web
     requests
@@ -20,7 +21,8 @@ let
     # python development
     mypy pytest yapf
   ]);
-
+  emacsWithPackages = (emacsPackagesGen emacsGcc).emacsWithPackages
+    (epkgs: ([epkgs.vterm]));
 in
 {
   imports =
@@ -96,11 +98,12 @@ in
     jq fd ripgrep
     sqlite
     alacritty
-    aspell
+    aspell wordnet
     rofi grim slurp
     mu offlineimap
     imagemagick
     mosh nmap
+    brightnessctl
 
     # Aesthetic things
     neofetch pywal powerline
@@ -108,7 +111,7 @@ in
     # Programming languages
     gcc clang gnumake cmake libtool
     rustup rust-analyzer
-    default-python
+    pythonWithPackages
     nixfmt
 
     # Applications
@@ -118,8 +121,9 @@ in
     spotify
     signal-desktop
     slack
+    discord
 
-    emacsGcc
+    emacsWithPackages
 
     # Data
     aspellDicts.en
