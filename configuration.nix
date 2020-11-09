@@ -6,20 +6,32 @@
 
 with pkgs;
 let
-  pythonWithPackages = python38.withPackages (python-packages: with python-packages; [
+  pythonWithPackages = python38.withPackages (ps: with ps; [
+    z3
+
     # scientific
     numpy scipy matplotlib
     cirq qiskit
     pint
 
-    # web
-    requests
-
     # utility
+    requests
     termcolor
+    pyyaml
+    dbus-python
 
     # python development
     mypy pytest yapf
+    python-language-server pyls-isort pyls-mypy
+
+    # go fast
+    numba
+  ]);
+  ghcWithPackages = haskellPackages.ghcWithPackages (ps: with ps; [
+    lens
+
+    # haskell development
+    haskell-language-server hlint hoogle
   ]);
   emacsWithPackages = (emacsPackagesGen emacsGcc).emacsWithPackages
     (epkgs: ([epkgs.vterm]));
@@ -76,6 +88,9 @@ in
   sound.enable = true;
   hardware.pulseaudio.enable = true;
 
+  # Enable bluetooth.
+  hardware.bluetooth.enable = true;
+
   # Enable touchpad support (enabled default in most desktopManager).
   services.xserver.libinput.enable = true;
 
@@ -93,25 +108,26 @@ in
   # with pkgs;
   environment.systemPackages = with pkgs; [
     # Utilities
-    wget vim git
+    wget vim git gnupg binutils
     htop gotop
-    jq fd ripgrep
+    jq fd ripgrep hyperfine
+    zip unzip unrar
     sqlite
     alacritty
     aspell wordnet
     rofi grim slurp
     mu offlineimap
-    imagemagick
+    imagemagick feh
     mosh nmap
     brightnessctl
 
     # Aesthetic things
     neofetch pywal powerline
 
-    # Programming languages
-    gcc clang gnumake cmake libtool
+    # Development
+    gcc clang gnumake cmake libtool sccache
     rustup rust-analyzer
-    pythonWithPackages
+    pythonWithPackages python-language-server
     nixfmt
 
     # Applications
