@@ -12,6 +12,7 @@ let
     # scientific
     numpy scipy matplotlib
     cirq qiskit
+    (callPackage ./python-modules/qutip/default.nix { })  # until my PR is merged
     pint
 
     # utility
@@ -33,20 +34,19 @@ let
     # haskell development
     haskell-language-server hlint hoogle
   ]);
-  emacsWithPackages = (emacsPackagesGen emacsGcc).emacsWithPackages
+  emacsWithPackages = (emacsPackagesGen emacsPgtkGcc).emacsWithPackages
     (epkgs: ([epkgs.vterm]));
 in
 {
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
-      ./filesystems.nix
     ];
 
   nixpkgs.config.allowUnfree = true;
   nixpkgs.overlays = [
     (import (builtins.fetchTarball {
-      url = https://github.com/nix-community/emacs-overlay/archive/master.tar.gz;
+      url = https://github.com/vinszent/emacs-overlay/archive/1409c99128fce17835e076b27be550ba04196009.tar.gz;
     }))
   ];
 
@@ -96,12 +96,19 @@ in
   services.xserver.libinput.enable = true;
 
   # Emacs daemon
-  services.emacs.enable = true;
+  systemd.user.services.emacs.enable = true;
 
   # Define a user account. Don't forget to set a password with ‘passwd’.
   users.users.mcncm = {
     isNormalUser = true;
     extraGroups = [ "wheel" ]; # Enable ‘sudo’ for the user.
+  };
+
+  # Define extra user groups.
+  users.groups.external-ssd = {
+    # NOTE Is this guaranteed not to collide with anything?
+    gid = 500;
+    members = [ "mcncm" ];
   };
 
   # List packages installed in system profile. To search, run:
@@ -129,6 +136,7 @@ in
     gcc clang gnumake cmake libtool sccache
     rustup rust-analyzer
     pythonWithPackages python-language-server
+    ghcWithPackages
     nixfmt
 
     # Applications
@@ -236,7 +244,7 @@ in
     };
 
     windowManager.i3 = {
-      enable = true;
+      enable = false;
       extraPackages = with pkgs; [
         dmenu
         i3status
@@ -262,6 +270,15 @@ in
 
   # Enable the OpenSSH daemon.
   # services.openssh.enable = true;
+
+  # Enable cron service
+  services.cron = {
+    enable = true;
+    systemCronJobs = [
+      # See https://crontab.guru
+      "0 4 * * *      mcncm    { date & /home/mcncm/.scripts/backup --force; } >> /tmp/cron.log"
+    ];
+  };
 
   # Open ports in the firewall.
   # networking.firewall.allowedTCPPorts = [ ... ];
