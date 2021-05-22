@@ -6,56 +6,103 @@
 
 with pkgs;
 let
-  pythonWithPackages = python38.withPackages (ps: with ps; [
-    z3
+  python-packages = (ps:
+    with ps; [
+      z3
 
-    # scientific
-    numpy scipy matplotlib
-    cirq qiskit
-    (callPackage ./python-modules/qutip/default.nix { })  # until my PR is merged
-    pint
+      # scientific
 
-    # utility
-    requests
-    termcolor
-    pyyaml
-    dbus-python
+      # Cirq fails a test. Build without testing.
+      cirq.overridePythonAttrs
+      (oldattrs: { checkPhase = ""; })
 
-    # python development
-    mypy pytest yapf
-    python-language-server pyls-isort pyls-mypy
+      ipython
+      jupyter
+      matplotlib
+      numpy
+      pint
+      pytorch
+      qiskit
+      scipy
+      (callPackage ./python/qutip/default.nix { }) # until my PR is merged
+      # (callPackage ./python/pycavy/default.nix { })
+      (callPackage ./python/pylatex/default.nix { })
 
-    # go fast
-    numba
-  ]);
-  ghcWithPackages = haskellPackages.ghcWithPackages (ps: with ps; [
-    lens
+      # utility
+      appdirs
+      daemonize
+      dbus-python
+      pyyaml
+      requests
+      termcolor
 
-    # haskell development
-    haskell-language-server hlint hoogle
-  ]);
+      # python development
+      mypy
+      pyls-isort
+      pyls-mypy
+      pytest
+      python-language-server
+      yapf
+
+      # go fast
+      numba
+
+      # web
+      django
+    ]);
+  ghcWithPackages = haskellPackages.ghcWithPackages (ps:
+    with ps; [
+      lens
+
+      # haskell development
+      haskell-language-server
+      hlint
+      hoogle
+    ]);
   emacsWithPackages = (emacsPackagesGen emacsPgtkGcc).emacsWithPackages
-    (epkgs: ([epkgs.vterm]));
-in
-{
-  imports =
-    [ # Include the results of the hardware scan.
-      ./hardware-configuration.nix
-    ];
+    (epkgs: ([ epkgs.vterm ]));
+in {
+  imports = [ # Include the results of the hardware scan.
+    ./cachix.nix
+    ./hardware-configuration.nix
+    ./zsa/default.nix
+    ./power-management.nix
+    ./networks.nix
+  ];
 
   nixpkgs.config.allowUnfree = true;
+
   nixpkgs.overlays = [
+    (import ./overlays/emacs-overlay
+
+      # (builtins.fetchTarball {
+      #   url = "https://github.com/vinszent/emacs-overlay/archive" +
+      #     "/1409c99128fce17835e076b27be550ba04196009.tar.gz";
+      # })
+
+    )
     (import (builtins.fetchTarball {
-      url = https://github.com/vinszent/emacs-overlay/archive/1409c99128fce17835e076b27be550ba04196009.tar.gz;
+      url =
+        "https://github.com/nix-community/neovim-nightly-overlay/archive/master.tar.gz";
     }))
   ];
 
- # Use the systemd-boot EFI boot loader.
+  hardware.cpu.intel.updateMicrocode = true;
+
+  # Use the systemd-boot EFI boot loader.
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
 
-  networking.hostName = "nixtamal"; # Define your hostname.
-  networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
+  # # Kernel settings to use rr
+  # boot.kernel.sysctl = {
+  #   "kernel.perf_event_paranoid" = mkOverride 50 1;
+  # };
+
+  networking = {
+    hostName = "nixtamal"; # Define your hostname.
+    wireless.enable = true; # Enables wireless support via wpa_supplicant.
+    nameservers = [ "8.8.8.8" "8.8.4.4" ];
+  };
 
   # Set your time zone.
   time.timeZone = "America/New_York";
@@ -80,16 +127,38 @@ in
 
   # Configure keymap in X11
   services.xserver.layout = "us";
-  # services.xserver.xkbOptions = "eurosign:e";
+  services.xserver.xkbOptions = "caps:swapescape";
+  services.xserver.autoRepeatDelay = 170;
+  services.xserver.autoRepeatInterval = 70;
 
   # Enable CUPS to print documents.
-  # services.printing.enable = true;
+  services.printing.enable = true;
+  services.printing.drivers = [ pkgs.hplipWithPlugin ];
 
   # Enable sound.
   sound.enable = true;
-  hardware.pulseaudio.enable = true;
+  hardware.pulseaudio = {
+    enable = true;
+    support32Bit = true;
+  };
 
-  # Enable bluetooth.
+  # services.jack = {
+  #   jackd.enable = true;
+  #   # support ALSA only programs via ALSA JACK PCM plugin
+  #   alsa.enable = false;
+  #   # support ALSA only programs via loopback device (supports programs like Steam)
+  #   loopback = {
+  #     enable = true;
+  #     # buffering parameters for dmix device to work with ALSA only semi-professional sound programs
+  #     #dmixConfig = ''
+  #     #  period_size 2048
+  #     #'';
+  #   };
+  # };
+
+  hardware.opengl.driSupport32Bit = true;
+
+  # Enable hardware.
   hardware.bluetooth.enable = true;
 
   # Enable touchpad support (enabled default in most desktopManager).
@@ -98,10 +167,14 @@ in
   # Emacs daemon
   systemd.user.services.emacs.enable = true;
 
+  # zsa keyboard udev rules
+  hardware.keyboard.zsa.enable = true;
+
   # Define a user account. Don't forget to set a password with ‘passwd’.
   users.users.mcncm = {
     isNormalUser = true;
-    extraGroups = [ "wheel" ]; # Enable ‘sudo’ for the user.
+    # extraGroups = [ "wheel" "plugdev" "jackaudio" ];
+    extraGroups = [ "wheel" "plugdev" ];
   };
 
   # Define extra user groups.
@@ -116,28 +189,69 @@ in
   # with pkgs;
   environment.systemPackages = with pkgs; [
     # Utilities
-    wget vim git gnupg binutils
-    htop gotop
-    jq fd ripgrep hyperfine
-    zip unzip unrar
+    wget
+    vim
+    neovim-nightly
+    git
+    gnupg
+    binutils
+    whois
+    htop
+    gotop
+    jq
+    fd
+    ripgrep
+    hyperfine
+    cloc
+    zip
+    unzip
+    unrar
     sqlite
     alacritty
-    aspell wordnet
-    rofi grim slurp
-    mu offlineimap
-    imagemagick feh
-    mosh nmap
+    aspell
+    wordnet
+    rofi
+    grim
+    slurp
+    mu
+    offlineimap
+    imagemagick
+    feh
+    vlc
+    mosh
+    nmap
     brightnessctl
+    strace
+    wally-cli
+    texlive.combined.scheme-full
 
     # Aesthetic things
-    neofetch pywal powerline
+    neofetch
+    pywal
+    powerline
 
     # Development
-    gcc clang gnumake cmake libtool sccache
-    rustup rust-analyzer
-    pythonWithPackages python-language-server
+    gcc
+    clang
+    gnumake
+    cmake
+    libtool
+    sccache
+    rustup
+    (python38.withPackages python-packages)
+    python-language-server
     ghcWithPackages
     nixfmt
+    lean
+    mathlibtools
+    coq
+    agda
+    idris2
+
+    # Some libraries/tools needed for building Rust applications with openssl
+    libiconv
+    openssl
+    pkgconfig
 
     # Applications
     zotero
@@ -156,31 +270,24 @@ in
     aspellDicts.en-science
 
     # swaywm
-    (
-      pkgs.writeTextFile {
-        name = "startsway";
-        destination = "/bin/startsway";
-        executable = true;
-        text = ''
-          #! ${pkgs.bash}/bin/bash
+    (pkgs.writeTextFile {
+      name = "startsway";
+      destination = "/bin/startsway";
+      executable = true;
+      text = ''
+        #! ${pkgs.bash}/bin/bash
 
-          # first import environment variables from the login manager
-          systemctl --user import-environment
-          # then start the service
-          exec systemctl --user start sway.service
-        '';
-      }
-    )
+        # first import environment variables from the login manager
+        systemctl --user import-environment
+        # then start the service
+        exec systemctl --user start sway.service
+      '';
+    })
   ];
 
   programs.sway = {
-    enable = true;
-    extraPackages = with pkgs; [
-      swaylock
-      xwayland
-      waybar
-      mako
-    ];
+    enable = false;
+    extraPackages = with pkgs; [ swaylock xwayland waybar mako ];
   };
 
   # environment = {
@@ -202,7 +309,7 @@ in
 
   systemd.user.services.sway = {
     description = "Sway - Wayland window manager";
-    documentation = ["man:sway(5)" ];
+    documentation = [ "man:sway(5)" ];
     bindsTo = [ "graphical-session.target" ];
     wants = [ "graphical-session-pre.target" ];
     after = [ "graphical-session-pre.target" ];
@@ -219,53 +326,48 @@ in
     };
   };
 
-  programs.waybar.enable = true;
+  programs.waybar.enable = false;
 
   # Some programs need SUID wrappers, can be configured further or are
   # started in user sessions.
   # programs.mtr.enable = true;
-  # programs.gnupg.agent = {
-  #   enable = true;
-  #   enableSSHSupport = true;
-  # };
+  programs.gnupg.agent = {
+    enable = true;
+    #   enableSSHSupport = true;
+  };
 
   # List services that you want to enable:
 
   # X windowing things
   services.xserver = {
-    enable = false;
+    enable = true;
 
-    desktopManager = {
-      xterm.enable = false;
-    };
+    desktopManager = { xterm.enable = false; };
 
-    displayManager = {
-      defaultSession = "none+i3";
-    };
+    displayManager = { defaultSession = "none+i3"; };
 
     windowManager.i3 = {
-      enable = false;
-      extraPackages = with pkgs; [
-        dmenu
-        i3status
-        i3lock
-      ];
+      enable = true;
+      extraPackages = with pkgs; [ dmenu i3status i3lock ];
     };
   };
 
   fonts.fonts = with pkgs; [
+    corefonts
     noto-fonts
     noto-fonts-cjk
     noto-fonts-emoji
     liberation_ttf
+    fantasque-sans-mono
+    roboto-mono
+    symbola
+    lmodern # latin modern
 
     # serif
     eb-garamond
     bakoma_ttf
 
-    (nerdfonts.override {
-      fonts = [ "FiraCode" ];
-    })
+    (nerdfonts.override { fonts = [ "FiraCode" ]; })
   ];
 
   # Enable the OpenSSH daemon.
