@@ -9,24 +9,26 @@ let
   python-packages = (ps:
     with ps; [
       z3
-
       # scientific
 
       # Cirq fails a test. Build without testing.
-      cirq.overridePythonAttrs
-      (oldattrs: { checkPhase = ""; })
+      # cirq.overridePythonAttrs
+      # (oldattrs: { checkPhase = ""; })
 
       ipython
       jupyter
       matplotlib
       numpy
       pint
-      pytorch
-      qiskit
+      # pytorch
+      # Currently broken on NixOS 21.05
+      # qiskit
       scipy
-      (callPackage ./python/qutip/default.nix { }) # until my PR is merged
-      # (callPackage ./python/pycavy/default.nix { })
-      (callPackage ./python/pylatex/default.nix { })
+      # # Currently broken: some wrong version of numpy
+      # (callPackage ./python/qutip/default.nix { }) # until my PR is merged
+      # # (callPackage ./python/pycavy/default.nix { })
+      # (callPackage ./python/pylatex/default.nix { })
+      h5py
 
       # utility
       appdirs
@@ -35,63 +37,78 @@ let
       pyyaml
       requests
       termcolor
+      pygments
 
       # python development
       mypy
-      pyls-isort
-      pyls-mypy
+      # pyls-isort
+      # pyls-mypy
       pytest
-      python-language-server
+      # python-language-server
       yapf
 
       # go fast
       numba
 
-      # web
-      django
+      # # web
+      # django
     ]);
-  ghcWithPackages = haskellPackages.ghcWithPackages (ps:
-    with ps; [
-      lens
+  # ghcWithPackages = haskellPackages.ghcWithPackages (ps:
+  #   with ps; [
+  #     lens
 
-      # haskell development
-      haskell-language-server
-      hlint
-      hoogle
-    ]);
-  emacsWithPackages = (emacsPackagesGen emacsPgtkGcc).emacsWithPackages
-    (epkgs: ([ epkgs.vterm ]));
+  #     # haskell development
+  #     haskell-language-server
+  #     hlint
+  #     hoogle
+  #     stack
+  #   ]);
+
+  emacsWithPackages =
+    (emacsPackagesGen emacsGcc).emacsWithPackages (epkgs: ([ epkgs.vterm ]));
+
+  unstable = import <nixos-unstable> { config = { allowUnfree = true; }; };
 in {
-  imports = [ # Include the results of the hardware scan.
+  imports = [
     ./cachix.nix
+    # Include the results of the hardware scan.
     ./hardware-configuration.nix
-    ./zsa/default.nix
+    # Now in NixOS 21.05?
+    # ./zsa/default.nix
     ./power-management.nix
     ./networks.nix
+    ./services.nix
+    # <nixos-unstable/nixos/modules/services/databases/influxdb2.nix>
+
   ];
 
   nixpkgs.config.allowUnfree = true;
 
   nixpkgs.overlays = [
-    (import ./overlays/emacs-overlay
-
-      # (builtins.fetchTarball {
-      #   url = "https://github.com/vinszent/emacs-overlay/archive" +
-      #     "/1409c99128fce17835e076b27be550ba04196009.tar.gz";
-      # })
-
-    )
     (import (builtins.fetchTarball {
       url =
-        "https://github.com/nix-community/neovim-nightly-overlay/archive/master.tar.gz";
+        "https://github.com/nix-community/emacs-overlay/archive/master.tar.gz";
     }))
+    (import "${
+        fetchTarball
+        "https://github.com/nix-community/fenix/archive/master.tar.gz"
+      }/overlay.nix")
   ];
 
   hardware.cpu.intel.updateMicrocode = true;
 
   # Use the systemd-boot EFI boot loader.
   boot.loader.systemd-boot.enable = true;
+  # Otherwise, the boot partition will run out of space and you won't be able to
+  # rebuind you won't be able to rebuild.
+  boot.loader.systemd-boot.configurationLimit = 100;
   boot.loader.efi.canTouchEfiVariables = true;
+
+  boot.initrd.luks.devices.luksroot = {
+    device = "/dev/disk/by-uuid/c5c44b85-7584-4665-a81e-9d0b554e8ae0";
+    preLVM = true;
+    allowDiscards = true;
+  };
 
   # # Kernel settings to use rr
   # boot.kernel.sysctl = {
@@ -111,7 +128,7 @@ in {
   # Per-interface useDHCP will be mandatory in the future, so this generated config
   # replicates the default behaviour.
   networking.useDHCP = false;
-  networking.interfaces.enp0s31f6.useDHCP = true;
+  # networking.interfaces.enp0s31f6.useDHCP = true;
   networking.interfaces.wlp2s0.useDHCP = true;
 
   # Configure network proxy if necessary
@@ -142,24 +159,13 @@ in {
     support32Bit = true;
   };
 
-  # services.jack = {
-  #   jackd.enable = true;
-  #   # support ALSA only programs via ALSA JACK PCM plugin
-  #   alsa.enable = false;
-  #   # support ALSA only programs via loopback device (supports programs like Steam)
-  #   loopback = {
-  #     enable = true;
-  #     # buffering parameters for dmix device to work with ALSA only semi-professional sound programs
-  #     #dmixConfig = ''
-  #     #  period_size 2048
-  #     #'';
-  #   };
-  # };
-
   hardware.opengl.driSupport32Bit = true;
 
   # Enable hardware.
   hardware.bluetooth.enable = true;
+
+  # Bluetooth GUI
+  services.blueman.enable = true;
 
   # Enable touchpad support (enabled default in most desktopManager).
   services.xserver.libinput.enable = true;
@@ -173,8 +179,7 @@ in {
   # Define a user account. Don't forget to set a password with ‘passwd’.
   users.users.mcncm = {
     isNormalUser = true;
-    # extraGroups = [ "wheel" "plugdev" "jackaudio" ];
-    extraGroups = [ "wheel" "plugdev" ];
+    extraGroups = [ "wheel" "plugdev" "libvirtd" ];
   };
 
   # Define extra user groups.
@@ -184,16 +189,33 @@ in {
     members = [ "mcncm" ];
   };
 
+  # Another user account for testing certain applications where we need an
+  # unprivileged user
+  users.users.untrusted = {
+    isNormalUser = true;
+    uid = 600;
+  };
+
+  # QEMU virtualization
+  # virtualisation.libvirtd = { enable = true; };
+
+  # VirtualBox virtualization
+  virtualisation.virtualbox.host = { enable = true; };
+
+  # Some builds fail when they run out of space in /run/user/1000
+  services.logind.extraConfig = "RuntimeDirectorySize=4G";
+
   # List packages installed in system profile. To search, run:
   # $ nix search wget
   # with pkgs;
   environment.systemPackages = with pkgs; [
-    # Utilities
+    # # Utilities
     wget
     vim
-    neovim-nightly
+    # neovim-nightly
     git
-    gnupg
+    bfg-repo-cleaner
+    # gnupg
     binutils
     whois
     htop
@@ -224,29 +246,46 @@ in {
     strace
     wally-cli
     texlive.combined.scheme-full
+    direnv
+    nix-direnv
+    # pinentry-curses
+    pinentry-gnome
+    pinentry-emacs
 
-    # Aesthetic things
+    ### Aesthetic things
     neofetch
     pywal
     powerline
 
-    # Development
+    ### Development
+    ## Languages/compilers
     gcc
-    clang
-    gnumake
-    cmake
+    # clang
     libtool
-    sccache
-    rustup
     (python38.withPackages python-packages)
-    python-language-server
-    ghcWithPackages
-    nixfmt
-    lean
-    mathlibtools
+    # ghcWithPackages
+    # lean
+    # mathlibtools
     coq
-    agda
-    idris2
+    # agda
+    # idris2
+    # fstar
+    jdk11
+
+    ## Build tools, static analysis tools, etc.
+    sccache
+    gnumake
+    nixfmt
+    cmake
+    cachix
+    (fenix.latest.withComponents [
+      "cargo"
+      "clippy"
+      "rust-src"
+      "rustc"
+      "rustfmt"
+    ])
+    rust-analyzer-nightly
 
     # Some libraries/tools needed for building Rust applications with openssl
     libiconv
@@ -255,12 +294,12 @@ in {
 
     # Applications
     zotero
-    firefox
-    zoom-us
+    firefox-wayland
     spotify
     signal-desktop
     slack
     discord
+    inkscape
 
     emacsWithPackages
 
@@ -285,19 +324,18 @@ in {
     })
   ];
 
+  environment.pathsToLink = [ "/share/nix-direnv" ];
+
   programs.sway = {
-    enable = false;
+    enable = true;
     extraPackages = with pkgs; [ swaylock xwayland waybar mako ];
   };
 
-  # environment = {
-  #   etc = {
-  #     # Put config files in /etc. Note that you can also put them in ~/.config, but then you can't manage them with NixOS anymore!
-  #     "sway/config".source = ./dotfiles/sway/config;
-  #     "xdg/waybar/config".source = ./dotfiles/waybar/config;
-  #     "xdg/waybar/style.css".source = ./dotfiles/waybar/style.css;
-  #   };
-  # };
+  # Firefox on Wayland
+  environment.sessionVariables = {
+    MOZ_ENABLE_WAYLAND = "-1";
+    XDG_CURRENT_DESKTOP = "sway";
+  };
 
   systemd.user.targets.sway-session = {
     description = "Sway compositor session";
@@ -326,28 +364,29 @@ in {
     };
   };
 
-  programs.waybar.enable = false;
+  programs.waybar.enable = true;
 
   # Some programs need SUID wrappers, can be configured further or are
   # started in user sessions.
   # programs.mtr.enable = true;
   programs.gnupg.agent = {
     enable = true;
-    #   enableSSHSupport = true;
+    # pinentryFlavor = "curses";
+    enableSSHSupport = true;
   };
 
   # List services that you want to enable:
 
   # X windowing things
   services.xserver = {
-    enable = true;
+    enable = false;
 
     desktopManager = { xterm.enable = false; };
 
     displayManager = { defaultSession = "none+i3"; };
 
     windowManager.i3 = {
-      enable = true;
+      enable = false;
       extraPackages = with pkgs; [ dmenu i3status i3lock ];
     };
   };
@@ -357,11 +396,13 @@ in {
     noto-fonts
     noto-fonts-cjk
     noto-fonts-emoji
+    twitter-color-emoji
     liberation_ttf
     fantasque-sans-mono
     roboto-mono
     symbola
     lmodern # latin modern
+    vistafonts # Calibri, etc.
 
     # serif
     eb-garamond
@@ -382,11 +423,25 @@ in {
     ];
   };
 
+  ### Databases
+
+  services.postgresql = {
+    enable = true;
+    package = pkgs.postgresql_14;
+    settings = { shared_preload_libraries = "timescaledb"; };
+    extraPlugins = [ pkgs.postgresql14Packages.timescaledb ];
+  };
+
+  services.redis.enable = true;
+
   # Open ports in the firewall.
   # networking.firewall.allowedTCPPorts = [ ... ];
   # networking.firewall.allowedUDPPorts = [ ... ];
   # Or disable the firewall altogether.
   # networking.firewall.enable = false;
+
+  # Speed up direnv
+  services.lorri.enable = true;
 
   # This value determines the NixOS release from which the default
   # settings for stateful data, like file locations and database versions
@@ -394,6 +449,6 @@ in {
   # this value at the release version of the first install of this system.
   # Before changing this value read the documentation for this option
   # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
-  system.stateVersion = "20.09"; # Did you read the comment?
+  system.stateVersion = "21.05"; # Did you read the comment?
 
 }
